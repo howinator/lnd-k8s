@@ -1,0 +1,97 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: bitcoind-mainnet
+spec:
+  selector:
+    app: bitcoind-mainnet
+  ports:
+  - name: rpc
+    port: 8332
+  - name: zmq
+    port: 28332
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bitcoind-config
+data:
+  bitcoin.conf: |
+    testnet=0
+    listen=0
+    server=1
+    txindex=1
+    disablewallet=0
+    dbcache=1024
+    maxorphantx=10
+    maxmempool=256
+    maxconnections=25
+    maxuploadtarget=5000
+
+    # Connection settings
+    rest=1
+    rpcbind=0.0.0.0
+    rpcport=8332
+    rpcallowip=192.168.0.0/16
+    zmqpubrawblock=tcp://0.0.0.0:28332
+    zmqpubrawtx=tcp://0.0.0.0:28333
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bitcoind
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: do-block-storage
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: bitcoind
+  name: bitcoind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bitcoind
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: bitcoind
+    spec:
+      containers:
+      - env:
+        - name: BITCOIN_DATA
+          value: /data/
+        args: ['-conf=/etc/bitcoin/bitcoin.conf', '-printtoconsole=1', '-rpcauth=${RPC_AUTH}']
+        image: howinator/bitcoin-core:0.20.1
+        name: bitcoin-core
+        imagePullPolicy: Always
+        env:
+          - name: RPC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: bitcoind
+                key: RPC_AUTH
+          - name: BITCOIN_DATA
+            value: /data
+        volumeMounts:
+        - mountPath: /data
+          name: bitcoind
+        - mountPath: /etc/bitcoin
+          name: bitcoind-config
+      volumes:
+      - name: bitcoind
+        persistentVolumeClaim:
+          claimName: bitcoind
+      - configMap:
+          defaultMode: 420
+          name: bitcoind-config
+        name: bitcoind-config
